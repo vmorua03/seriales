@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historial de seriales</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<style>
+  body{font-family:Arial,sans-serif;margin:16px;background:#f3f4f6;color:#111}
+  h1{margin:0 0 10px;font-size:20px}
+  button{padding:8px 12px;margin:0 6px 6px 0;border:1px solid #888;border-radius:6px;background:#fff;cursor:pointer;font-size:14px}
+  button:disabled{opacity:.4;cursor:default}
+  #status{margin:6px 0 12px;font-size:13px;color:#555;min-height:18px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:800px){.grid{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid #ccc;border-radius:10px;padding:14px}
+  .card h2{margin:0 0 8px;font-size:16px}
+  #serial{font-size:34px;font-weight:bold;color:#0a58ca;word-break:break-all;margin:6px 0}
+  #list{max-height:60vh;overflow:auto;font-size:14px}
+  .item{border-top:1px solid #e3e3e3;padding:6px 0}
+  .item small{color:#777}
+  .previews canvas{height:36px;max-width:100%;border:1px dashed #bbb;margin:4px 6px 0 0;background:#fafafa}
+  #calBox{margin-top:14px;background:#fff;border:1px solid #ccc;border-radius:10px;padding:12px}
+  #calWrap{position:relative;display:inline-block;touch-action:none;cursor:crosshair}
+  #calCanvas{max-width:100%;display:block}
+  .rect{position:absolute;border:2px solid red;background:rgba(255,0,0,.18);pointer-events:none}
+  #vid{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+<h1>Historial de seriales</h1>
+
+<div>
+  <button id="btnShare">1. Compartir pestaña WebVisu</button>
+  <button id="btnCal" disabled>2. Calibrar campos</button>
+  <button id="btnRun" disabled>3. Iniciar lectura</button>
+  <button id="btnStop" disabled>Detener</button>
+</div>
+<div id="status"></div>
+
+<div class="grid">
+  <section class="card">
+    <h2>Serial actual</h2>
+    <div id="serial">—</div>
+    <div>Current State: <b id="state">—</b></div>
+    <div class="previews"><canvas id="pv1"></canvas><canvas id="pv2"></canvas></div>
+  </section>
+  <section class="card">
+    <h2>Seriales vistos (<span id="count">0</span>)
+      <button id="btnCsv">CSV</button><button id="btnClear">Limpiar</button></h2>
+    <div id="list"></div>
+  </section>
+</div>
+
+<div id="calBox" hidden>
+  <p id="calMsg"></p>
+  <div id="calWrap"><canvas id="calCanvas"></canvas></div>
+</div>
+
+<video id="vid" muted playsinline></video>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const INTERVALO_MS = 1500;
+
+let stream = null, worker = null, timer = null, busy = false;
+let roi = JSON.parse(localStorage.getItem('roi') || 'null');   // [serialBox, stateBox] en fracciones
+let hist = JSON.parse(localStorage.getItem('hist') || '[]');
+let cand = null, candN = 0;
+
+const setStatus = (t) => ($('status').textContent = t);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function renderHist() {
+  $('count').textContent = hist.length;
+  $('list').innerHTML = hist.slice().reverse().map((h) =>
+    `<div class="item"><b>${esc(h.serial)}</b> · ${esc(h.state)}<br><small>${esc(h.time)}</small></div>`).join('');
+  if (hist.length) {
+    const u = hist[hist.length - 1];
+    $('serial').textContent = u.serial;
+    $('state').textContent = u.state || '—';
+  }
+}
+
+// ---------- 1. Compartir pestaña ----------
+$('btnShare').onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    const vid = $('vid');
+    vid.srcObject = stream;
+    await vid.play();
+    stream.getVideoTracks()[0].onended = () => { detener(); setStatus('Se dejó de compartir la pantalla.'); $('btnCal').disabled = true; $('btnRun').disabled = true; };
+    $('btnCal').disabled = false;
+    $('btnRun').disabled = !roi;
+    setStatus(roi ? 'Listo. Pulsa "Iniciar lectura".' : 'Ahora pulsa "Calibrar campos".');
+  } catch (e) {
+    setStatus('No se pudo compartir: ' + e.message);
+  }
+};
+
+// ---------- 2. Calibrar ----------
+$('btnCal').onclick = () => {
+  const vid = $('vid');
+  if (!vid.videoWidth) { setStatus('Aún no llega imagen de la pestaña.'); return; }
+  const c = $('calCanvas');
+  c.width = vid.videoWidth; c.height = vid.videoHeight;
+  c.getContext('2d').drawImage(vid, 0, 0);
+  $('calBox').hidden = false;
+  document.querySelectorAll('.rect').forEach((r) => r.remove());
+
+  const nombres = ['el VALOR de SERIAL NUMBER', 'el VALOR de CURRENT STATE'];
+  const cajas = [];
+  let inicio = null, el = null;
+  $('calMsg').textContent = 'Dibuja un rectángulo sobre ' + nombres[0];
+  const wrap = $('calWrap');
+
+  wrap.onpointerdown = (e) => {
+    const r = c.getBoundingClientRect();
+    inicio = { x: e.clientX - r.left, y: e.clientY - r.top };
+    el = document.createElement('div'); el.className = 'rect'; wrap.appendChild(el);
+    wrap.setPointerCapture(e.pointerId);
+  };
+  wrap.onpointermove = (e) => {
+    if (!inicio) return;
+    const r = c.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    el.style.left = Math.min(x, inicio.x) + 'px';
+    el.style.top = Math.min(y, inicio.y) + 'px';
+    el.style.width = Math.abs(x - inicio.x) + 'px';
+    el.style.height = Math.abs(y - inicio.y) + 'px';
+  };
+  wrap.onpointerup = (e) => {
+    if (!inicio) return;
+    const r = c.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const w = Math.abs(x - inicio.x), h = Math.abs(y - inicio.y);
+    if (w > 5 && h > 5) {
+      cajas.push({ x: Math.min(x, inicio.x) / r.width, y: Math.min(y, inicio.y) / r.height, w: w / r.width, h: h / r.height });
+    } else { el.remove(); }
+    inicio = null;
+    if (cajas.length === 1) $('calMsg').textContent = 'Ahora dibuja sobre ' + nombres[1];
+    if (cajas.length === 2) {
+      roi = cajas;
+      localStorage.setItem('roi', JSON.stringify(roi));
+      wrap.onpointerdown = wrap.onpointermove = wrap.onpointerup = null;
+      $('calMsg').textContent = 'Calibrado. Ya puedes iniciar la lectura.';
+      $('btnRun').disabled = false;
+      setStatus('Calibración guardada.');
+    }
+  };
+};
+
+// ---------- 3. OCR ----------
+function recortar(f, preview) {
+  const vid = $('vid');
+  const sx = f.x * vid.videoWidth, sy = f.y * vid.videoHeight;
+  const sw = f.w * vid.videoWidth, sh = f.h * vid.videoHeight;
+  const k = 3;
+  const t = document.createElement('canvas');
+  t.width = Math.max(1, Math.round(sw * k));
+  t.height = Math.max(1, Math.round(sh * k));
+  const g = t.getContext('2d');
+  g.imageSmoothingEnabled = true;
+  g.drawImage(vid, sx, sy, sw, sh, 0, 0, t.width, t.height);
+  const img = g.getImageData(0, 0, t.width, t.height);
+  const d = img.data;
+  let suma = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+    d[i] = d[i + 1] = d[i + 2] = v; suma += v;
+  }
+  if (suma / (d.length / 4) < 110) for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i];
+  g.putImageData(img, 0, 0);
+  if (preview) { preview.width = t.width; preview.height = t.height; preview.getContext('2d').drawImage(t, 0, 0); }
+  return t;
+}
+
+async function leer(f, preview) {
+  const res = await worker.recognize(recortar(f, preview));
+  return (res.data.text || '').replace(/\s+/g, ' ').trim();
+}
+
+function procesar(serial, state) {
+  serial = serial.replace(/\s+/g, '');
+  if (!serial) return;
+  if (serial === cand) candN++; else { cand = serial; candN = 1; }
+  if (candN < 2) return;                       // exige 2 lecturas iguales seguidas
+  $('serial').textContent = serial;
+  $('state').textContent = state || '—';
+  const ult = hist[hist.length - 1];
+  if (!ult || ult.serial !== serial) {
+    hist.push({ serial, state, time: new Date().toLocaleString() });
+  } else if (state && ult.state !== state) {
+    ult.state = state;
+  } else { return; }
+  localStorage.setItem('hist', JSON.stringify(hist));
+  renderHist();
+}
+
+async function ciclo() {
+  if (busy || !roi || !stream) return;
+  busy = true;
+  try {
+    const serial = await leer(roi[0], $('pv1'));
+    const state = await leer(roi[1], $('pv2'));
+    procesar(serial, state);
+    setStatus('Leyendo… última lectura: ' + new Date().toLocaleTimeString());
+  } catch (e) { setStatus('Error: ' + e.message); }
+  busy = false;
+}
+
+$('btnRun').onclick = async () => {
+  $('btnRun').disabled = true;
+  if (!worker) {
+    setStatus('Cargando OCR (necesita internet la primera vez)…');
+    try { worker = await Tesseract.createWorker('eng'); }
+    catch (e) { setStatus('No se pudo cargar el OCR: ' + e.message); $('btnRun').disabled = false; return; }
+  }
+  $('calBox').hidden = true;
+  $('btnStop').disabled = false;
+  setStatus('Leyendo…');
+  timer = setInterval(ciclo, INTERVALO_MS);
+};
+
+function detener() {
+  clearInterval(timer); timer = null;
+  $('btnStop').disabled = true;
+  $('btnRun').disabled = !(stream && roi);
+}
+$('btnStop').onclick = () => { detener(); setStatus('Lectura detenida.'); };
+
+// ---------- Historial ----------
+$('btnClear').onclick = () => {
+  if (confirm('¿Borrar todo el historial?')) {
+    hist = []; localStorage.setItem('hist', '[]'); renderHist();
+    $('serial').textContent = '—'; $('state').textContent = '—';
+  }
+};
+$('btnCsv').onclick = () => {
+  const filas = ['serial,estado,fecha'].concat(hist.map((h) =>
+    [h.serial, h.state, h.time].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(',')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([filas.join('\n')], { type: 'text/csv' }));
+  a.download = 'historial_seriales.csv';
+  a.click();
+};
+
+renderHist();
+setStatus('Abre el WebVisu en otra pestaña y pulsa "1. Compartir pestaña WebVisu".');
+</script>
+</body>
+</html>
