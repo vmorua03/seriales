@@ -3,58 +3,194 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Historial de seriales</title>
+<title>Seriales en prueba</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <style>
-  body{font-family:Arial,sans-serif;margin:16px;background:#f3f4f6;color:#111}
-  h1{margin:0 0 10px;font-size:20px}
-  button{padding:8px 12px;margin:0 6px 6px 0;border:1px solid #888;border-radius:6px;background:#fff;cursor:pointer;font-size:14px}
-  button:disabled{opacity:.4;cursor:default}
-  #status{margin:6px 0 12px;font-size:13px;color:#555;min-height:18px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  @media(max-width:800px){.grid{grid-template-columns:1fr}}
-  .card{background:#fff;border:1px solid #ccc;border-radius:10px;padding:14px}
-  .card h2{margin:0 0 8px;font-size:16px}
-  #serial{font-size:34px;font-weight:bold;color:#0a58ca;word-break:break-all;margin:6px 0}
-  #list{max-height:60vh;overflow:auto;font-size:14px}
-  .item{border-top:1px solid #e3e3e3;padding:6px 0}
-  .item small{color:#777}
-  .previews canvas{height:36px;max-width:100%;border:1px dashed #bbb;margin:4px 6px 0 0;background:#fafafa}
-  #calBox{margin-top:14px;background:#fff;border:1px solid #ccc;border-radius:10px;padding:12px}
-  #calWrap{position:relative;display:inline-block;touch-action:none;cursor:crosshair}
-  #calCanvas{max-width:100%;display:block}
-  .rect{position:absolute;border:2px solid red;background:rgba(255,0,0,.18);pointer-events:none}
+  :root{
+    --bench:#e3e8eb;
+    --paper:#f6f8f9;
+    --line:#c9d2d7;
+    --ink:#15232b;
+    --muted:#586973;
+    --panel:#1a2b35;
+    --panel-2:#233845;
+    --on-panel:#eef4f7;
+    --on-panel-muted:#93a9b5;
+    --ok:#22a45d;
+    --bad:#e04848;
+    --warn:#e6a519;
+    --idle:#7d909b;
+    --accent:#1d6fa5;
+    --radius:14px;
+    --sans:'Barlow',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+    --cond:'Barlow Condensed','Barlow',system-ui,Arial,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,Consolas,'Courier New',monospace;
+  }
+  *{box-sizing:border-box}
+  html{background:var(--bench)}
+  body{margin:0;font-family:var(--sans);font-size:16px;line-height:1.45;color:var(--ink);background:var(--bench);min-height:100vh}
+  button{font:inherit;color:inherit;cursor:pointer}
+  button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 20px 40px}
+
+  /* Encabezado */
+  .top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  h1{margin:0;font-family:var(--cond);font-weight:600;font-size:2.2rem;line-height:1;letter-spacing:.01em}
+  .sub{margin:6px 0 0;color:var(--muted);max-width:56ch}
+  .pill{display:inline-flex;align-items:center;gap:9px;padding:7px 14px;border-radius:999px;background:var(--paper);border:1px solid var(--line);font-weight:500}
+  .pill .dot{width:10px;height:10px;border-radius:50%;background:var(--idle)}
+  .pill.live .dot{background:var(--ok);box-shadow:0 0 0 4px rgba(34,164,93,.2)}
+  .pill.warn .dot{background:var(--warn);box-shadow:0 0 0 4px rgba(230,165,25,.22)}
+
+  /* Pasos */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+  .step{display:flex;align-items:center;gap:12px;text-align:left;padding:12px 14px;border-radius:var(--radius);border:1.5px solid var(--line);background:var(--paper)}
+  .step:disabled{opacity:.45;cursor:not-allowed}
+  .step:not(:disabled):hover{border-color:var(--accent)}
+  .step .n{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:var(--cond);font-weight:600;font-size:1.1rem;background:var(--bench);color:var(--muted)}
+  .step .t{display:block;font-weight:600}
+  .step .s{display:block;font-size:.85rem;color:var(--muted)}
+  .step.done{border-color:var(--ok)}
+  .step.done .n{background:var(--ok);color:#fff}
+  .step.active{border-color:var(--accent);background:#fff}
+  .step.active .n{background:var(--accent);color:#fff}
+
+  /* Cuerpo */
+  .main{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:18px;align-items:start}
+
+  /* Panel del serial actual */
+  .display{background:var(--panel);color:var(--on-panel);border-radius:18px;padding:26px 26px 20px}
+  .display h2{margin:0;font-family:var(--sans);font-weight:500;font-size:1rem;color:var(--on-panel-muted)}
+  #serial{margin:14px 0 4px;font-family:var(--mono);font-weight:600;font-size:clamp(2rem,5.2vw,3.6rem);line-height:1.1;letter-spacing:.015em;word-break:break-all}
+  #serial.empty{font-family:var(--cond);font-size:2rem;font-weight:500;color:var(--on-panel-muted);letter-spacing:0}
+  #seen{margin:0;color:var(--on-panel-muted);font-size:.95rem;min-height:1.4em}
+  .stateRow{display:flex;align-items:center;gap:14px;margin-top:22px;padding:14px 16px;border-radius:12px;background:var(--panel-2)}
+  .lamp{flex:none;width:22px;height:22px;border-radius:50%;background:var(--idle);transition:background .25s,box-shadow .25s}
+  .lamp.ok{background:var(--ok);box-shadow:0 0 0 5px rgba(34,164,93,.25),0 0 18px rgba(34,164,93,.6)}
+  .lamp.bad{background:var(--bad);box-shadow:0 0 0 5px rgba(224,72,72,.25),0 0 18px rgba(224,72,72,.6)}
+  .lamp.warn{background:var(--warn);box-shadow:0 0 0 5px rgba(230,165,25,.25),0 0 18px rgba(230,165,25,.55)}
+  .stateRow .lbl{font-size:.85rem;color:var(--on-panel-muted);line-height:1.1}
+  #state{font-family:var(--cond);font-weight:600;font-size:1.9rem;line-height:1.1;word-break:break-word}
+  details{margin-top:18px;color:var(--on-panel-muted)}
+  summary{cursor:pointer;font-size:.9rem;padding:4px 0}
+  .crops{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+  .crops figure{margin:0}
+  .crops figcaption{font-size:.8rem;margin-bottom:4px}
+  .crops canvas{display:block;height:40px;max-width:100%;background:#fff;border-radius:6px}
+
+  /* Historial */
+  .ledger{background:var(--paper);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+  .ledgerHead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:16px 18px;border-bottom:1px solid var(--line)}
+  .ledgerHead h2{margin:0;font-family:var(--cond);font-weight:600;font-size:1.5rem}
+  .ledgerHead .count{font-family:var(--sans);font-weight:500;font-size:1rem;color:var(--muted);margin-left:8px}
+  .tools{display:flex;gap:8px}
+  .btn{padding:7px 14px;border-radius:9px;border:1.5px solid var(--line);background:#fff;font-weight:500}
+  .btn:hover{border-color:var(--accent)}
+  .btn.danger:hover{border-color:var(--bad);color:var(--bad)}
+  .scroll{max-height:62vh;overflow:auto}
+  table{width:100%;border-collapse:collapse}
+  thead th{position:sticky;top:0;background:var(--paper);text-align:left;font-weight:500;font-size:.88rem;color:var(--muted);padding:10px 18px;border-bottom:1px solid var(--line)}
+  tbody td{padding:11px 18px;border-bottom:1px solid #e3e8eb;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  td.ser{font-family:var(--mono);font-weight:600;font-size:1.02rem;word-break:break-all}
+  td.when{color:var(--muted);font-size:.9rem;white-space:nowrap}
+  .chip{display:inline-flex;align-items:center;gap:7px;padding:3px 11px;border-radius:999px;font-weight:600;font-size:.9rem;background:#e9eef1;color:var(--ink)}
+  .chip::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--idle)}
+  .chip.ok{background:#dff3e8}.chip.ok::before{background:var(--ok)}
+  .chip.bad{background:#fbe3e3}.chip.bad::before{background:var(--bad)}
+  .chip.warn{background:#fbefd0}.chip.warn::before{background:var(--warn)}
+  tr.fresh td{animation:fresh 2.4s ease-out 1}
+  @keyframes fresh{from{background:#d6e9f6}to{background:transparent}}
+  .empty-note{padding:34px 22px;text-align:center;color:var(--muted)}
+  .empty-note b{display:block;color:var(--ink);font-size:1.05rem;margin-bottom:4px}
+
+  /* Calibración */
+  .cal{margin-top:18px;background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:18px}
+  .calHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+  .calHead p{margin:0;font-family:var(--cond);font-weight:600;font-size:1.4rem}
+  #calWrap{position:relative;display:inline-block;max-width:100%;touch-action:none;cursor:crosshair;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  #calCanvas{display:block;max-width:100%;height:auto}
+  .rect{position:absolute;border:2px solid #ff3b30;background:rgba(255,59,48,.18);pointer-events:none}
+  [hidden]{display:none!important}
   #vid{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none}
+
+  @media (max-width:900px){
+    .main{grid-template-columns:1fr}
+    .steps{grid-template-columns:1fr}
+  }
+  @media (prefers-reduced-motion:reduce){
+    tr.fresh td{animation:none}
+    .lamp{transition:none}
+  }
 </style>
 </head>
 <body>
-<h1>Historial de seriales</h1>
+<div class="wrap">
 
-<div>
-  <button id="btnShare">1. Compartir pestaña WebVisu</button>
-  <button id="btnCal" disabled>2. Calibrar campos</button>
-  <button id="btnRun" disabled>3. Iniciar lectura</button>
-  <button id="btnStop" disabled>Detener</button>
-</div>
-<div id="status"></div>
+  <header class="top">
+    <div>
+      <h1>Seriales en prueba</h1>
+      <p class="sub">Lee el serial y el estado del WebVisu y guarda cada serial que pasa.</p>
+    </div>
+    <div class="pill" id="pill"><span class="dot"></span><span id="pillText">Sin pestaña compartida</span></div>
+  </header>
 
-<div class="grid">
-  <section class="card">
-    <h2>Serial actual</h2>
-    <div id="serial">—</div>
-    <div>Current State: <b id="state">—</b></div>
-    <div class="previews"><canvas id="pv1"></canvas><canvas id="pv2"></canvas></div>
+  <nav class="steps" aria-label="Pasos para empezar">
+    <button class="step" id="btnShare"><span class="n">1</span><span><span class="t">Compartir pestaña</span><span class="s">Elige la pestaña del WebVisu</span></span></button>
+    <button class="step" id="btnCal" disabled><span class="n">2</span><span><span class="t">Calibrar campos</span><span class="s">Marca Serial Number y Current State</span></span></button>
+    <button class="step" id="btnRun" disabled><span class="n">3</span><span><span class="t" id="runLabel">Iniciar lectura</span><span class="s">Lee cada 1.5 segundos</span></span></button>
+  </nav>
+
+  <div class="main">
+    <section class="display" aria-live="polite">
+      <h2>Serial actual</h2>
+      <div id="serial" class="empty">Sin lectura</div>
+      <p id="seen">Comparte la pestaña del WebVisu para empezar.</p>
+      <div class="stateRow">
+        <span class="lamp" id="lamp"></span>
+        <div>
+          <div class="lbl">Current State</div>
+          <div id="state">—</div>
+        </div>
+      </div>
+      <details>
+        <summary>Ver lo que lee el OCR</summary>
+        <div class="crops">
+          <figure><figcaption>Serial Number</figcaption><canvas id="pv1" width="10" height="10"></canvas></figure>
+          <figure><figcaption>Current State</figcaption><canvas id="pv2" width="10" height="10"></canvas></figure>
+        </div>
+      </details>
+    </section>
+
+    <section class="ledger">
+      <div class="ledgerHead">
+        <h2>Historial<span class="count" id="count">0 seriales</span></h2>
+        <div class="tools">
+          <button class="btn" id="btnCsv">Descargar CSV</button>
+          <button class="btn danger" id="btnClear">Borrar historial</button>
+        </div>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Serial</th><th>Estado</th><th>Visto</th></tr></thead>
+          <tbody id="list"></tbody>
+        </table>
+        <div class="empty-note" id="emptyNote"><b>Todavía no hay seriales</b>Cuando cambie el serial en el WebVisu, aparecerá aquí.</div>
+      </div>
+    </section>
+  </div>
+
+  <section class="cal" id="calBox" hidden>
+    <div class="calHead">
+      <p id="calMsg"></p>
+      <button class="btn" id="btnCalClose">Cerrar</button>
+    </div>
+    <div id="calWrap"><canvas id="calCanvas"></canvas></div>
   </section>
-  <section class="card">
-    <h2>Seriales vistos (<span id="count">0</span>)
-      <button id="btnCsv">CSV</button><button id="btnClear">Limpiar</button></h2>
-    <div id="list"></div>
-  </section>
-</div>
 
-<div id="calBox" hidden>
-  <p id="calMsg"></p>
-  <div id="calWrap"><canvas id="calCanvas"></canvas></div>
 </div>
 
 <video id="vid" muted playsinline></video>
@@ -65,20 +201,59 @@ const INTERVALO_MS = 1500;
 
 let stream = null, worker = null, timer = null, busy = false;
 let roi = JSON.parse(localStorage.getItem('roi') || 'null');   // [serialBox, stateBox] en fracciones
-let hist = JSON.parse(localStorage.getItem('hist') || '[]');
+let hist = JSON.parse(localStorage.getItem('hist') || '[]');   // [{serial, state, time, ts}]
 let cand = null, candN = 0;
 
-const setStatus = (t) => ($('status').textContent = t);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (h) => h.ts
+  ? new Date(h.ts).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'medium' })
+  : (h.time || '');
 
-function renderHist() {
-  $('count').textContent = hist.length;
-  $('list').innerHTML = hist.slice().reverse().map((h) =>
-    `<div class="item"><b>${esc(h.serial)}</b> · ${esc(h.state)}<br><small>${esc(h.time)}</small></div>`).join('');
+// Color del estado según el texto leído
+function estadoClase(s) {
+  const t = (s || '').toUpperCase();
+  if (/PASS|\bOK\b|GOOD|APROB|BUENO/.test(t)) return 'ok';
+  if (/FAIL|\bNG\b|ERR|BAD|RECHAZ|MALO/.test(t)) return 'bad';
+  if (/RUN|TEST|WAIT|ESPER|PROC|IDLE|BUSY/.test(t)) return 'warn';
+  return 'idle';
+}
+
+function setPill(texto, clase) {
+  $('pill').className = 'pill' + (clase ? ' ' + clase : '');
+  $('pillText').textContent = texto;
+}
+
+function refreshSteps() {
+  $('btnShare').classList.toggle('done', !!stream);
+  $('btnCal').classList.toggle('done', !!roi);
+  $('btnCal').disabled = !stream;
+  $('btnRun').disabled = !(stream && roi);
+  $('btnRun').classList.toggle('active', !!timer);
+  $('runLabel').textContent = timer ? 'Detener lectura' : 'Iniciar lectura';
+}
+
+function mostrarActual(serial, state, cuando) {
+  const s = $('serial');
+  s.textContent = serial;
+  s.classList.remove('empty');
+  $('state').textContent = state || '—';
+  $('lamp').className = 'lamp ' + estadoClase(state);
+  $('seen').textContent = cuando ? 'Visto el ' + cuando : '';
+}
+
+function renderHist(fresh) {
+  $('count').textContent = hist.length + (hist.length === 1 ? ' serial' : ' seriales');
+  $('emptyNote').hidden = hist.length > 0;
+  $('list').innerHTML = hist.slice().reverse().map((h, i) => {
+    const c = estadoClase(h.state);
+    return `<tr${fresh && i === 0 ? ' class="fresh"' : ''}>
+      <td class="ser">${esc(h.serial)}</td>
+      <td><span class="chip ${c}">${esc(h.state || '—')}</span></td>
+      <td class="when">${esc(fmt(h))}</td></tr>`;
+  }).join('');
   if (hist.length) {
     const u = hist[hist.length - 1];
-    $('serial').textContent = u.serial;
-    $('state').textContent = u.state || '—';
+    mostrarActual(u.serial, u.state, fmt(u));
   }
 }
 
@@ -89,26 +264,32 @@ $('btnShare').onclick = async () => {
     const vid = $('vid');
     vid.srcObject = stream;
     await vid.play();
-    stream.getVideoTracks()[0].onended = () => { detener(); setStatus('Se dejó de compartir la pantalla.'); $('btnCal').disabled = true; $('btnRun').disabled = true; };
-    $('btnCal').disabled = false;
-    $('btnRun').disabled = !roi;
-    setStatus(roi ? 'Listo. Pulsa "Iniciar lectura".' : 'Ahora pulsa "Calibrar campos".');
+    stream.getVideoTracks()[0].onended = () => {
+      detener(); stream = null; refreshSteps();
+      setPill('Se dejó de compartir la pestaña', 'warn');
+    };
+    refreshSteps();
+    if (roi) { setPill('Listo para leer', 'warn'); $('seen').textContent = hist.length ? $('seen').textContent : 'Pulsa "Iniciar lectura".'; }
+    else { setPill('Falta calibrar los campos', 'warn'); $('seen').textContent = 'Pulsa "Calibrar campos" y marca los dos valores.'; }
   } catch (e) {
-    setStatus('No se pudo compartir: ' + e.message);
+    setPill('No se pudo compartir: ' + e.message, 'warn');
   }
 };
 
 // ---------- 2. Calibrar ----------
+$('btnCalClose').onclick = () => { $('calBox').hidden = true; };
+
 $('btnCal').onclick = () => {
   const vid = $('vid');
-  if (!vid.videoWidth) { setStatus('Aún no llega imagen de la pestaña.'); return; }
+  if (!vid.videoWidth) { setPill('Aún no llega imagen de la pestaña', 'warn'); return; }
   const c = $('calCanvas');
   c.width = vid.videoWidth; c.height = vid.videoHeight;
   c.getContext('2d').drawImage(vid, 0, 0);
   $('calBox').hidden = false;
   document.querySelectorAll('.rect').forEach((r) => r.remove());
+  $('calBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  const nombres = ['el VALOR de SERIAL NUMBER', 'el VALOR de CURRENT STATE'];
+  const nombres = ['el valor de Serial Number', 'el valor de Current State'];
   const cajas = [];
   let inicio = null, el = null;
   $('calMsg').textContent = 'Dibuja un rectángulo sobre ' + nombres[0];
@@ -143,9 +324,9 @@ $('btnCal').onclick = () => {
       roi = cajas;
       localStorage.setItem('roi', JSON.stringify(roi));
       wrap.onpointerdown = wrap.onpointermove = wrap.onpointerup = null;
-      $('calMsg').textContent = 'Calibrado. Ya puedes iniciar la lectura.';
-      $('btnRun').disabled = false;
-      setStatus('Calibración guardada.');
+      $('calMsg').textContent = 'Calibrado. Cierra esta sección e inicia la lectura.';
+      refreshSteps();
+      setPill('Calibración guardada', 'warn');
     }
   };
 };
@@ -185,16 +366,17 @@ function procesar(serial, state) {
   if (!serial) return;
   if (serial === cand) candN++; else { cand = serial; candN = 1; }
   if (candN < 2) return;                       // exige 2 lecturas iguales seguidas
-  $('serial').textContent = serial;
-  $('state').textContent = state || '—';
   const ult = hist[hist.length - 1];
+  const ahora = Date.now();
   if (!ult || ult.serial !== serial) {
-    hist.push({ serial, state, time: new Date().toLocaleString() });
+    hist.push({ serial, state, time: new Date(ahora).toLocaleString(), ts: ahora });
+    localStorage.setItem('hist', JSON.stringify(hist));
+    renderHist(true);
   } else if (state && ult.state !== state) {
     ult.state = state;
-  } else { return; }
-  localStorage.setItem('hist', JSON.stringify(hist));
-  renderHist();
+    localStorage.setItem('hist', JSON.stringify(hist));
+    renderHist(false);
+  }
 }
 
 async function ciclo() {
@@ -204,49 +386,53 @@ async function ciclo() {
     const serial = await leer(roi[0], $('pv1'));
     const state = await leer(roi[1], $('pv2'));
     procesar(serial, state);
-    setStatus('Leyendo… última lectura: ' + new Date().toLocaleTimeString());
-  } catch (e) { setStatus('Error: ' + e.message); }
+    setPill('Leyendo · ' + new Date().toLocaleTimeString(), 'live');
+  } catch (e) { setPill('Error: ' + e.message, 'warn'); }
   busy = false;
 }
 
-$('btnRun').onclick = async () => {
+async function iniciar() {
   $('btnRun').disabled = true;
   if (!worker) {
-    setStatus('Cargando OCR (necesita internet la primera vez)…');
+    setPill('Cargando OCR (necesita internet la primera vez)', 'warn');
     try { worker = await Tesseract.createWorker('eng'); }
-    catch (e) { setStatus('No se pudo cargar el OCR: ' + e.message); $('btnRun').disabled = false; return; }
+    catch (e) { setPill('No se pudo cargar el OCR: ' + e.message, 'warn'); refreshSteps(); return; }
   }
   $('calBox').hidden = true;
-  $('btnStop').disabled = false;
-  setStatus('Leyendo…');
   timer = setInterval(ciclo, INTERVALO_MS);
-};
+  refreshSteps();
+  setPill('Leyendo', 'live');
+}
 
 function detener() {
   clearInterval(timer); timer = null;
-  $('btnStop').disabled = true;
-  $('btnRun').disabled = !(stream && roi);
+  refreshSteps();
+  if (stream) setPill('Lectura detenida', 'warn');
 }
-$('btnStop').onclick = () => { detener(); setStatus('Lectura detenida.'); };
+
+$('btnRun').onclick = () => { timer ? detener() : iniciar(); };
 
 // ---------- Historial ----------
 $('btnClear').onclick = () => {
+  if (!hist.length) return;
   if (confirm('¿Borrar todo el historial?')) {
-    hist = []; localStorage.setItem('hist', '[]'); renderHist();
-    $('serial').textContent = '—'; $('state').textContent = '—';
+    hist = []; localStorage.setItem('hist', '[]');
+    $('serial').textContent = 'Sin lectura'; $('serial').classList.add('empty');
+    $('state').textContent = '—'; $('lamp').className = 'lamp'; $('seen').textContent = '';
+    renderHist(false);
   }
 };
 $('btnCsv').onclick = () => {
   const filas = ['serial,estado,fecha'].concat(hist.map((h) =>
-    [h.serial, h.state, h.time].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(',')));
+    [h.serial, h.state, fmt(h)].map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(',')));
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([filas.join('\n')], { type: 'text/csv' }));
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + filas.join('\n')], { type: 'text/csv;charset=utf-8' }));
   a.download = 'historial_seriales.csv';
   a.click();
 };
 
-renderHist();
-setStatus('Abre el WebVisu en otra pestaña y pulsa "1. Compartir pestaña WebVisu".');
+renderHist(false);
+refreshSteps();
 </script>
 </body>
 </html>
